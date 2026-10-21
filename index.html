@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TikTok Cars</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
-  /* Escenario siempre vertical 9:16, centrado */
-  #stage { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); overflow: hidden; background: #7cc576; }
+  /* Fondo verde (nunca negro: TikTok marca las pantallas negras como baja calidad) */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #7cc576; font-family: system-ui, sans-serif; }
+  /* Escenario que llena toda la ventana */
+  #stage { position: absolute; inset: 0; overflow: hidden; background: #7cc576; }
   canvas { display: block; }
   #feed { position: absolute; left: 6px; top: 6px; max-width: 55%; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
   .ev { background: rgba(0,0,0,.55); color: #fff; padding: 3px 7px; border-radius: 8px; font-size: 11px;
@@ -16,7 +17,7 @@
   .ev b { color: #ffd84d; }
   .ev .gicon img { width: 16px; height: 16px; vertical-align: middle; }
   @keyframes fadein { from { opacity: 0; transform: translateX(-20px); } }
-  #help { position: absolute; left: 8px; right: 8px; top: 8px; background: rgba(0,0,0,.6); color: #fff;
+  #help { position: absolute; left: 8px; right: 8px; top: 8px; max-width: 620px; margin: 0 auto; background: rgba(0,0,0,.6); color: #fff;
           border-radius: 10px; padding: 6px; font-size: 11px; }
   #help.hidden { display: none; }
   #giftList { display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px; }
@@ -60,6 +61,7 @@ function lapsFor(coins) {
 }
 const MAX_CARS = 40;
 const MAX_CONES = 60;
+const TAP_KART = 'kart-oobi', TAP_LAPS = 1, MAX_TAP_KARTS = 8; // vehículo de los taps
 const CAR_SCALE = 1.8;
 // Modo prueba (contadores): solo con ?test en la URL. En el live no se ven.
 const TEST = new URLSearchParams(location.search).has('test');
@@ -106,7 +108,6 @@ function speedFor(v) {
 
 // ================== ESCENA ==================
 const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 const stage = document.getElementById('stage');
@@ -117,23 +118,25 @@ scene.background = new THREE.Color(0x9fd8f5);
 
 const camera = new THREE.PerspectiveCamera(45, 1, 5, 400);
 function resize() {
-  // Tamaño 9:16 que cabe en la ventana
-  const h = Math.min(innerHeight, innerWidth * 16 / 9), w = h * 9 / 16;
-  stage.style.width = w + 'px'; stage.style.height = h + 'px';
+  const w = innerWidth, h = innerHeight;
+  // Resolución interna de al menos 1920 px de alto para que no se vea borroso al escalar
+  renderer.setPixelRatio(Math.min(3, Math.max(devicePixelRatio, 1920 / h)));
   renderer.setSize(w, h);
   camera.aspect = w / h;
-  // La vista está girada para que el lado largo del circuito ocupe la altura.
+  // En vertical la vista se gira para que el lado largo del circuito ocupe la altura.
   // El circuito va entre el panel de vehículos (arriba) y el chat de TikTok (abajo)
   const help = document.getElementById('help'), feed = document.getElementById('feed');
   const panelH = help.classList.contains('hidden') ? 0 : help.offsetHeight + 8;
   feed.style.top = panelH + 6 + 'px';
   const TOP = panelH / h + 0.02, BOTTOM = 0.66; // franja visible (fracción de la altura)
   const USABLE = BOTTOM - TOP;
-  const halfV = 42, halfH = 28; // medio largo/ancho del circuito con margen
+  const portrait = w < h;
+  const halfV = portrait ? 42 : 28, halfH = portrait ? 28 : 42; // medio largo/ancho del circuito con margen
   const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
   const dist = Math.max(halfV * 0.8 / (t * USABLE), halfH / (t * camera.aspect)) + 6;
   const elev = THREE.MathUtils.degToRad(62);
-  camera.position.set(Math.cos(elev) * dist - 1, Math.sin(elev) * dist, 0);
+  if (portrait) camera.position.set(Math.cos(elev) * dist - 1, Math.sin(elev) * dist, 0);
+  else camera.position.set(-1, Math.sin(elev) * dist, Math.cos(elev) * dist);
   camera.lookAt(-1, 0, 0);
   camera.setViewOffset(w, h, 0, h * (0.5 - (TOP + BOTTOM) / 2), w, h);
   camera.updateProjectionMatrix();
@@ -293,7 +296,7 @@ function makeLabel(text) {
 const cars = [];
 let laneToggle = 0;
 
-async function spawnCar(vehicle, user, laps) {
+async function spawnCar(vehicle, user, laps, tap = false) {
   if (cars.length >= MAX_CARS) return;
   const proto = await loadModel(vehicle);
   const root = new THREE.Group();
@@ -301,20 +304,24 @@ async function spawnCar(vehicle, user, laps) {
   root.add(model);
   const wheels = [];
   model.traverse(o => { if (o.name.startsWith('wheel')) wheels.push(o); });
-  const label = makeLabel(user);
-  label.position.y = 2.2;
-  root.add(label);
+  const label = user ? makeLabel(user) : null;
+  if (label) { label.position.y = 2.2; root.add(label); }
   root.scale.setScalar(0.001);
   scene.add(root);
   const lane = (laneToggle++ % 2) ? LANE : -LANE;
   cars.push({
-    root, wheels, label, lane, laps,
+    root, wheels, label, lane, laps, tap,
     dist: -2, // arranca justo antes de la línea de salida
     travelled: 0,
     speed: speedFor(vehicle) * (0.9 + Math.random() * 0.2),
     cur: 0, age: 0, leaving: 0,
   });
 }
+
+// Tráfico de fondo: unos vehículos sin nombre que circulan siempre, para que la pantalla
+// nunca esté quieta aunque nadie envíe regalos
+const AMBIENT = ['sedan', 'taxi', 'van'];
+AMBIENT.forEach((v, i) => setTimeout(() => spawnCar(v, null, Infinity), i * 2500));
 
 // ================== CONOS (TAPS) ==================
 const cones = [];
@@ -356,6 +363,11 @@ function onGift(giftName, user = 'Anónimo', count = 1, coins, picture) {
 }
 // Llamar desde la integración real de TikTok: onLike('usuario', likeCount)
 function onLike(user = 'Anónimo', count = 1) {
+  // Cada tanda de taps es, al azar, un kart (1 vuelta) o conos. Con muchos karts de tap en pista, conos.
+  if (Math.random() < 0.5 && cars.filter(c => c.tap).length < MAX_TAP_KARTS) {
+    spawnCar(TAP_KART, user, TAP_LAPS, true);
+    return;
+  }
   const n = Math.min(count, 5);
   for (let i = 0; i < n; i++) setTimeout(spawnCone, i * 120);
 }
@@ -463,7 +475,7 @@ function update(dt) {
       c.root.position.y = c.leaving * 4;
       if (s === 0) {
         scene.remove(c.root);
-        c.label.material.map.dispose(); c.label.material.dispose();
+        if (c.label) { c.label.material.map.dispose(); c.label.material.dispose(); }
         cars.splice(i, 1);
         continue;
       }
