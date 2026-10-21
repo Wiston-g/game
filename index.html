@@ -9,24 +9,23 @@
   /* Escenario siempre vertical 9:16, centrado */
   #stage { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); overflow: hidden; background: #7cc576; }
   canvas { display: block; }
-  #feed { position: absolute; left: 8px; top: 8px; max-width: 62%; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-  .ev { background: rgba(0,0,0,.6); color: #fff; padding: 4px 8px; border-radius: 8px; font-size: 13px;
+  #feed { position: absolute; left: 6px; top: 6px; max-width: 55%; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  .ev { background: rgba(0,0,0,.55); color: #fff; padding: 3px 7px; border-radius: 8px; font-size: 11px;
         display: flex; align-items: center; gap: 8px; animation: fadein .25s ease-out; transition: opacity .6s; }
-  .ev img { width: 26px; height: 26px; object-fit: contain; }
+  .ev img { width: 20px; height: 20px; object-fit: contain; }
   .ev b { color: #ffd84d; }
-  .ev .gicon img { width: 22px; height: 22px; vertical-align: middle; }
+  .ev .gicon img { width: 16px; height: 16px; vertical-align: middle; }
   @keyframes fadein { from { opacity: 0; transform: translateX(-20px); } }
-  #help { position: absolute; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff;
+  #help { position: absolute; left: 8px; right: 8px; top: 8px; background: rgba(0,0,0,.6); color: #fff;
           border-radius: 10px; padding: 6px; font-size: 11px; }
   #help.hidden { display: none; }
-  #help .tip { opacity: .8; margin: 0 2px 4px; }
-  #giftList { display: grid; grid-template-columns: repeat(auto-fill, minmax(34px, 1fr)); gap: 3px; }
-  #giftList button { position: relative; background: rgba(255,255,255,.12); border: 0; border-radius: 6px; padding: 2px; cursor: pointer; color: #fff; }
+  #giftList { display: grid; grid-template-columns: repeat(13, 1fr); gap: 3px; }
+  #giftList button { position: relative; background: rgba(255,255,255,.12); border: 0; border-radius: 6px; padding: 2px; cursor: pointer; color: #fff; container-type: inline-size; }
   #giftList button:hover { background: rgba(255,255,255,.3); }
-  #giftList img { width: 100%; height: 26px; object-fit: contain; display: block; }
-  #giftList .gift { position: absolute; left: 1px; top: 1px; width: 16px; height: 16px; border-radius: 50%;
-                    background: rgba(255,255,255,.9); display: grid; place-items: center; font-size: 10px; line-height: 1; }
-  #giftList .gift img { width: 14px; height: 14px; }
+  #giftList img { width: 100%; height: auto; aspect-ratio: 1.15; object-fit: contain; display: block; }
+  #giftList .gift { position: absolute; left: 1px; top: 1px; width: 40%; aspect-ratio: 1; border-radius: 50%;
+                    background: rgba(255,255,255,.9); display: grid; place-items: center; font-size: 28cqw; line-height: 1; }
+  #giftList .gift img { width: 90%; height: 90%; aspect-ratio: auto; }
   #stats { position: absolute; right: 8px; top: 8px; color: #fff; background: rgba(0,0,0,.5); padding: 4px 8px; border-radius: 8px; font-size: 12px; }
 </style>
 <script type="importmap">
@@ -41,7 +40,6 @@
 <div id="feed"></div>
 <div id="stats"></div>
 <div id="help">
-  <div class="tip">Clic = regalo · Shift = x5 · Espacio = cono · Tab oculta</div>
   <div id="giftList"></div>
 </div>
 </div>
@@ -63,6 +61,8 @@ function lapsFor(coins) {
 const MAX_CARS = 40;
 const MAX_CONES = 60;
 const CAR_SCALE = 1.8;
+// Modo prueba (contadores): solo con ?test en la URL. En el live no se ven.
+const TEST = new URLSearchParams(location.search).has('test');
 
 // Regalo de TikTok → vehículo. La tecla es solo para probar en local.
 // Imagen del regalo: gifts/<nombre-en-minúsculas-con-guiones>.png (ej. gifts/ice-cream-cone.png).
@@ -122,16 +122,20 @@ function resize() {
   stage.style.width = w + 'px'; stage.style.height = h + 'px';
   renderer.setSize(w, h);
   camera.aspect = w / h;
-  // En vertical se gira la vista para que el lado largo del circuito ocupe la altura
-  const portrait = camera.aspect < 1;
-  const LONG = 42, SHORT = 28; // medio ancho/alto del circuito con margen
-  const halfV = portrait ? LONG : SHORT, halfH = portrait ? SHORT : LONG;
+  // La vista está girada para que el lado largo del circuito ocupe la altura.
+  // El circuito va entre el panel de vehículos (arriba) y el chat de TikTok (abajo)
+  const help = document.getElementById('help'), feed = document.getElementById('feed');
+  const panelH = help.classList.contains('hidden') ? 0 : help.offsetHeight + 8;
+  feed.style.top = panelH + 6 + 'px';
+  const TOP = panelH / h + 0.02, BOTTOM = 0.66; // franja visible (fracción de la altura)
+  const USABLE = BOTTOM - TOP;
+  const halfV = 42, halfH = 28; // medio largo/ancho del circuito con margen
   const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-  const dist = Math.max(halfV * 0.85 / t, halfH / (t * camera.aspect)) + 6;
+  const dist = Math.max(halfV * 0.8 / (t * USABLE), halfH / (t * camera.aspect)) + 6;
   const elev = THREE.MathUtils.degToRad(62);
-  const up = Math.sin(elev) * dist, back = Math.cos(elev) * dist;
-  if (portrait) camera.position.set(back - 1, up, 0); else camera.position.set(-1, up, back);
+  camera.position.set(Math.cos(elev) * dist - 1, Math.sin(elev) * dist, 0);
   camera.lookAt(-1, 0, 0);
+  camera.setViewOffset(w, h, 0, h * (0.5 - (TOP + BOTTOM) / 2), w, h);
   camera.updateProjectionMatrix();
 }
 addEventListener('resize', resize);
@@ -335,17 +339,20 @@ function pushFeed(html) {
   const el = document.createElement('div');
   el.className = 'ev'; el.innerHTML = html;
   feed.prepend(el);
-  while (feed.children.length > 7) feed.lastChild.remove();
+  while (feed.children.length > 3) feed.lastChild.remove();
   setTimeout(() => { el.style.opacity = 0; setTimeout(() => el.remove(), 600); }, 5000);
 }
 const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
 
 // Llamar desde la integración real de TikTok: onGift('Rose', 'usuario', 1)
-function onGift(giftName, user = 'Anónimo', count = 1) {
-  const g = giftByName.get(String(giftName).toLowerCase());
-  if (!g) return;
-  pushFeed(`<img src="${PREVIEWS}${g.vehicle}.png"> <b>${esc(user)}</b> envió <span class="gicon">${giftIcon(g)}</span> ${esc(g.gift)}${count > 1 ? ' x' + count : ''}`);
-  for (let i = 0; i < Math.min(count, 10); i++) setTimeout(() => spawnCar(g.vehicle, user, lapsFor(g.coins)), i * 450);
+function onGift(giftName, user = 'Anónimo', count = 1, coins, picture) {
+  // Regalos que no están en la lista: vehículo al azar
+  const g = giftByName.get(String(giftName).toLowerCase())
+    || { gift: giftName, vehicle: GIFTS[Math.floor(Math.random() * GIFTS.length)].vehicle, coins: 1, emoji: '🎁' };
+  const icon = picture ? `<img src="${esc(picture)}">` : giftIcon(g);
+  pushFeed(`<img src="${PREVIEWS}${g.vehicle}.png"> <b>${esc(user)}</b> envió <span class="gicon">${icon}</span> ${esc(g.gift)}${count > 1 ? ' x' + count : ''}`);
+  const laps = lapsFor(coins ?? g.coins); // precio real si llega de TikTok
+  for (let i = 0; i < Math.min(count, 10); i++) setTimeout(() => spawnCar(g.vehicle, user, laps), i * 450);
 }
 // Llamar desde la integración real de TikTok: onLike('usuario', likeCount)
 function onLike(user = 'Anónimo', count = 1) {
@@ -354,6 +361,39 @@ function onLike(user = 'Anónimo', count = 1) {
 }
 window.onGift = onGift;
 window.onLike = onLike;
+
+// ================== TIKFINITY (directo real) ==================
+// TikFinity (app de escritorio) emite los eventos del live en este WebSocket local.
+const TIKFINITY_URL = 'ws://localhost:21213/';
+let tikStatus = 'TikFinity: conectando…';
+const streaks = new Map(); // combos en curso: cuántos regalos ya se han contado
+
+function connectTikFinity() {
+  let ws;
+  try { ws = new WebSocket(TIKFINITY_URL); } catch { setTimeout(connectTikFinity, 3000); return; }
+  ws.onopen = () => { tikStatus = 'TikFinity: ✅ conectado'; };
+  ws.onclose = () => { tikStatus = 'TikFinity: ❌ sin conexión'; setTimeout(connectTikFinity, 3000); };
+  ws.onmessage = e => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    const d = msg.data || {};
+    const user = d.nickname || d.uniqueId || 'Anónimo';
+    if (msg.event === 'gift') {
+      // Los regalos en combo llegan varias veces con repeatCount acumulado: solo se cuenta lo nuevo
+      const total = d.repeatCount || 1;
+      let count = total;
+      if (d.giftType === 1) {
+        const key = `${d.uniqueId}:${d.giftId}`;
+        count = total - (streaks.get(key) || 0);
+        if (d.repeatEnd) streaks.delete(key); else streaks.set(key, total);
+      }
+      if (count > 0) onGift(d.giftName, user, count, d.diamondCount, d.giftPictureUrl);
+    } else if (msg.event === 'like') {
+      onLike(user, d.likeCount || 1);
+    }
+  };
+}
+connectTikFinity();
 
 // ================== TECLADO (pruebas locales) ==================
 const giftByKey = new Map(GIFTS.map(g => [g.key, g]));
@@ -366,7 +406,7 @@ addEventListener('keydown', e => {
   if (g) onGift(g.gift, randUser(), e.shiftKey ? 5 : 1);
 });
 // Tab oculta/muestra el panel (las letras ya están asignadas a regalos)
-addEventListener('keydown', e => { if (e.code === 'Tab') { e.preventDefault(); document.getElementById('help').classList.toggle('hidden'); } });
+addEventListener('keydown', e => { if (e.code === 'Tab') { e.preventDefault(); document.getElementById('help').classList.toggle('hidden'); resize(); } });
 // Imagen del regalo con el emoji como respaldo si falta el archivo
 const giftSlug = g => g.gift.toLowerCase().replace(/\s+/g, '-');
 function giftIcon(g) {
@@ -377,6 +417,7 @@ const giftList = document.getElementById('giftList');
 giftList.innerHTML = GIFTS.map(g =>
   `<button data-key="${g.key}" title="${g.gift} (${g.coins} monedas) → ${g.vehicle}, ${lapsFor(g.coins)} vueltas (tecla ${g.key})"><span class="gift">${giftIcon(g)}</span><img src="${PREVIEWS}${g.vehicle}.png"></button>`
 ).join('') + `<button data-cone title="Tap → cono (Espacio o Z)"><span class="gift">👆</span><img src="${PREVIEWS}cone.png"></button>`;
+resize(); // recalcular con el panel ya lleno
 giftList.addEventListener('click', e => {
   const b = e.target.closest('button');
   if (!b) return;
@@ -468,7 +509,8 @@ function update(dt) {
     }
   }
 
-  stats.textContent = `Vehículos: ${cars.length}  ·  Conos: ${cones.length}`;
+  stats.style.display = TEST ? '' : 'none';
+  if (TEST) stats.textContent = `${tikStatus}  ·  Vehículos: ${cars.length}  ·  Conos: ${cones.length}`;
 }
 
 renderer.setAnimationLoop(() => {
