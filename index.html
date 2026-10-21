@@ -1,0 +1,474 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TikTok Cars</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #7cc576; font-family: system-ui, sans-serif; }
+  canvas { display: block; }
+  #feed { position: fixed; left: 12px; top: 12px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  .ev { background: rgba(0,0,0,.6); color: #fff; padding: 6px 10px; border-radius: 8px; font-size: 15px;
+        display: flex; align-items: center; gap: 8px; animation: fadein .25s ease-out; transition: opacity .6s; }
+  .ev img { width: 32px; height: 32px; object-fit: contain; }
+  .ev b { color: #ffd84d; }
+  .ev .gicon img { width: 22px; height: 22px; vertical-align: middle; }
+  @keyframes fadein { from { opacity: 0; transform: translateX(-20px); } }
+  #help { position: fixed; left: 8px; right: 8px; bottom: 8px; background: rgba(0,0,0,.6); color: #fff;
+          border-radius: 10px; padding: 6px; font-size: 11px; }
+  #help.hidden { display: none; }
+  #help .tip { opacity: .8; margin: 0 2px 4px; }
+  #giftList { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 4px; }
+  #giftList button { position: relative; background: rgba(255,255,255,.12); border: 0; border-radius: 6px; padding: 2px; cursor: pointer; color: #fff; }
+  #giftList button:hover { background: rgba(255,255,255,.3); }
+  #giftList img { width: 100%; height: 34px; object-fit: contain; display: block; }
+  #giftList .gift { position: absolute; left: 1px; top: 1px; width: 22px; height: 22px; border-radius: 50%;
+                    background: rgba(255,255,255,.9); display: grid; place-items: center; font-size: 14px; line-height: 1; }
+  #giftList .gift img { width: 20px; height: 20px; }
+  #stats { position: fixed; right: 12px; top: 12px; color: #fff; background: rgba(0,0,0,.5); padding: 6px 10px; border-radius: 8px; font-size: 14px; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<div id="feed"></div>
+<div id="stats"></div>
+<div id="help">
+  <div class="tip">Haz clic en un vehículo (o pulsa su letra, se ve al pasar el ratón) · Shift = combo x5 · Espacio/Z = cono · Tab oculta</div>
+  <div id="giftList"></div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+// ================== CONFIGURACIÓN ==================
+const MODELS = 'kenney_car-kit/Models/GLB%20format/';
+const PREVIEWS = 'kenney_car-kit/Previews/';
+// Vueltas según el precio del regalo (monedas)
+function lapsFor(coins) {
+  if (coins >= 1000) return 5;
+  if (coins >= 600) return 4;
+  if (coins >= 100) return 3;
+  return 2;
+}
+const MAX_CARS = 40;
+const MAX_CONES = 60;
+const CAR_SCALE = 1.8;
+
+// Regalo de TikTok → vehículo. La tecla es solo para probar en local.
+// Imagen del regalo: gifts/<nombre-en-minúsculas-con-guiones>.png (ej. gifts/ice-cream-cone.png).
+// Si no existe, se muestra el emoji.
+const GIFTS = [
+  { key: 'A', gift: 'Rose',               vehicle: 'kart-oobi', emoji: '🌹', coins: 1 },
+  { key: 'B', gift: 'TikTok',             vehicle: 'kart-oodi', emoji: '🎵', coins: 1 },
+  { key: 'C', gift: 'GG',                 vehicle: 'kart-ooli', emoji: '🎮', coins: 1 },
+  { key: 'D', gift: 'Ice Cream Cone',     vehicle: 'kart-oopi', emoji: '🍦', coins: 1 },
+  { key: 'E', gift: 'Finger Heart',       vehicle: 'kart-oozi', emoji: '🫰', coins: 5 },
+  { key: 'F', gift: 'Heart Me',           vehicle: 'sedan', emoji: '💗', coins: 1 },
+  { key: 'G', gift: 'Doughnut',           vehicle: 'hatchback-sports', emoji: '🍩', coins: 30 },
+  { key: 'H', gift: 'Friendship Necklace',vehicle: 'taxi', emoji: '📿', coins: 10 },
+  { key: 'I', gift: 'Perfume',            vehicle: 'van', emoji: '🧴', coins: 20 },
+  { key: 'J', gift: 'Hand Hearts',        vehicle: 'suv', emoji: '🫶', coins: 100 },
+  { key: 'K', gift: 'Confetti',           vehicle: 'delivery', emoji: '🎉', coins: 100 },
+  { key: 'L', gift: 'Sunglasses',         vehicle: 'delivery-flat', emoji: '🕶️', coins: 199 },
+  { key: 'M', gift: 'Corgi',              vehicle: 'tractor', emoji: '🐕', coins: 299 },
+  { key: 'N', gift: 'Hat and Mustache',   vehicle: 'tractor-shovel', emoji: '🎩', coins: 99 },
+  { key: 'O', gift: 'Cap',                vehicle: 'tractor-police', emoji: '🧢', coins: 99 },
+  { key: 'P', gift: 'Panda',              vehicle: 'truck', emoji: '🐼', coins: 5 },
+  { key: 'Q', gift: 'Gift Box',           vehicle: 'truck-flat', emoji: '🎁', coins: 0 }, // precio desconocido
+  { key: 'R', gift: 'Swan',               vehicle: 'garbage-truck', emoji: '🦢', coins: 699 },
+  { key: 'S', gift: 'Money Gun',          vehicle: 'police', emoji: '💸', coins: 500 },
+  { key: 'T', gift: 'Love Bang',          vehicle: 'ambulance', emoji: '💥', coins: 25 },
+  { key: 'U', gift: 'Galaxy',             vehicle: 'firetruck', emoji: '🌌', coins: 1000 },
+  { key: 'V', gift: 'Train',              vehicle: 'sedan-sports', emoji: '🚂', coins: 899 },
+  { key: 'W', gift: 'Lion',               vehicle: 'suv-luxury', emoji: '🦁', coins: 29999 },
+  { key: 'X', gift: 'Rosa',               vehicle: 'race', emoji: '🌷', coins: 10 },
+  { key: 'Y', gift: 'Universe',           vehicle: 'race-future', emoji: '🪐', coins: 34999 },
+];
+
+// Velocidad (unidades/seg) por tipo de vehículo
+function speedFor(v) {
+  if (v.startsWith('race')) return 17;
+  if (v.startsWith('kart') || v.includes('sports')) return 14;
+  if (v.startsWith('tractor')) return 7;
+  if (v.includes('truck') || v.startsWith('delivery')) return 9;
+  return 11;
+}
+
+// ================== ESCENA ==================
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x9fd8f5);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 5, 400);
+function resize() {
+  const w = innerWidth, h = innerHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  // En vertical se gira la vista para que el lado largo del circuito ocupe la altura
+  const portrait = camera.aspect < 1;
+  const LONG = 42, SHORT = 28; // medio ancho/alto del circuito con margen
+  const halfV = portrait ? LONG : SHORT, halfH = portrait ? SHORT : LONG;
+  const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const dist = Math.max(halfV * 0.85 / t, halfH / (t * camera.aspect)) + 6;
+  const elev = THREE.MathUtils.degToRad(62);
+  const up = Math.sin(elev) * dist, back = Math.cos(elev) * dist;
+  if (portrait) camera.position.set(back - 1, up, 0); else camera.position.set(-1, up, back);
+  camera.lookAt(-1, 0, 0);
+  camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize);
+resize();
+
+scene.add(new THREE.HemisphereLight(0xffffff, 0x5a8f4a, 1.1));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(25, 50, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 140 });
+scene.add(sun);
+
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(400, 400), new THREE.MeshLambertMaterial({ color: 0x7cc576 }));
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// ================== CARRETERA ==================
+const ROAD_W = 7, LANE = 1.75;
+const curve = new THREE.CatmullRomCurve3([
+  [-30, -18], [0, -22], [28, -18], [35, 0], [27, 14], [11, 11],
+  [0, 19], [-14, 22], [-30, 15], [-37, 0],
+].map(([x, z]) => new THREE.Vector3(x, 0, z)), true, 'centripetal');
+const TRACK_LEN = curve.getLength();
+
+// Tabla precalculada de puntos y normales por distancia
+const SAMPLES = 2000;
+const P = [], N = [];
+for (let i = 0; i <= SAMPLES; i++) {
+  const u = i / SAMPLES;
+  P.push(curve.getPointAt(u));
+  const t = curve.getTangentAt(u);
+  N.push(new THREE.Vector3(-t.z, 0, t.x).normalize());
+}
+function trackAt(dist, offset, out) {
+  let u = ((dist % TRACK_LEN) + TRACK_LEN) % TRACK_LEN / TRACK_LEN * SAMPLES;
+  const i = Math.floor(u), f = u - i, j = Math.min(i + 1, SAMPLES);
+  out.lerpVectors(P[i], P[j], f);
+  const n = N[i];
+  out.x += n.x * offset; out.z += n.z * offset;
+  return out;
+}
+
+function ribbon(from, to, y, color) {
+  const pos = [], idx = [];
+  for (let i = 0; i <= SAMPLES; i++) {
+    const p = P[i], n = N[i];
+    pos.push(p.x + n.x * from, y, p.z + n.z * from, p.x + n.x * to, y, p.z + n.z * to);
+    if (i < SAMPLES) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color, side: THREE.DoubleSide }));
+  m.receiveShadow = true;
+  scene.add(m);
+}
+ribbon(-ROAD_W / 2 - 0.6, ROAD_W / 2 + 0.6, 0.03, 0xd9d2b8); // arcén
+ribbon(-ROAD_W / 2, ROAD_W / 2, 0.08, 0x3d3f45);             // asfalto
+ribbon(-ROAD_W / 2 + 0.15, -ROAD_W / 2 + 0.35, 0.13, 0xffffff);
+ribbon(ROAD_W / 2 - 0.35, ROAD_W / 2 - 0.15, 0.13, 0xffffff);
+
+// Línea central discontinua
+{
+  const dashGeo = new THREE.PlaneGeometry(0.2, 1.4);
+  const dashMat = new THREE.MeshLambertMaterial({ color: 0xffd84d });
+  const count = Math.floor(TRACK_LEN / 3.2);
+  const dashes = new THREE.InstancedMesh(dashGeo, dashMat, count);
+  const o = new THREE.Object3D(), a = new THREE.Vector3(), b = new THREE.Vector3();
+  for (let i = 0; i < count; i++) {
+    const d = i * TRACK_LEN / count;
+    trackAt(d, 0, a); trackAt(d + 0.5, 0, b);
+    o.position.set(a.x, 0.13, a.z);
+    o.rotation.set(-Math.PI / 2, 0, Math.atan2(b.x - a.x, b.z - a.z) + Math.PI);
+    o.updateMatrix();
+    dashes.setMatrixAt(i, o.matrix);
+  }
+  scene.add(dashes);
+}
+
+// Línea de salida a cuadros
+{
+  const c = document.createElement('canvas'); c.width = 64; c.height = 16;
+  const x = c.getContext('2d');
+  for (let i = 0; i < 16; i++) for (let j = 0; j < 4; j++) { x.fillStyle = (i + j) % 2 ? '#000' : '#fff'; x.fillRect(i * 4, j * 4, 4, 4); }
+  const tex = new THREE.CanvasTexture(c); tex.magFilter = THREE.NearestFilter;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(ROAD_W, 1.4), new THREE.MeshLambertMaterial({ map: tex }));
+  const a = trackAt(0, 0, new THREE.Vector3()), b = trackAt(0.5, 0, new THREE.Vector3());
+  m.position.set(a.x, 0.15, a.z);
+  m.rotation.set(-Math.PI / 2, 0, Math.atan2(b.x - a.x, b.z - a.z));
+  scene.add(m);
+}
+
+// Árboles low-poly decorativos (fuera de la pista)
+{
+  const trunkG = new THREE.CylinderGeometry(0.25, 0.3, 1.2, 6);
+  const leafG = new THREE.ConeGeometry(1.4, 3, 7);
+  const trunkM = new THREE.MeshLambertMaterial({ color: 0x8b5a2b });
+  const leafM = [0x3e8e41, 0x2f7a3a, 0x58a84a].map(c => new THREE.MeshLambertMaterial({ color: c }));
+  const tmp = new THREE.Vector3();
+  let placed = 0, tries = 0;
+  while (placed < 70 && tries++ < 2000) {
+    const x = (Math.random() - 0.5) * 120, z = (Math.random() - 0.5) * 90;
+    let near = false;
+    for (let i = 0; i < SAMPLES; i += 10) { if (Math.hypot(P[i].x - x, P[i].z - z) < ROAD_W / 2 + 3) { near = true; break; } }
+    if (near) continue;
+    const tree = new THREE.Group();
+    const trunk = new THREE.Mesh(trunkG, trunkM); trunk.position.y = 0.6;
+    const leaf = new THREE.Mesh(leafG, leafM[placed % 3]); leaf.position.y = 2.6;
+    trunk.castShadow = leaf.castShadow = true;
+    tree.add(trunk, leaf);
+    tree.position.set(x, 0, z);
+    tree.scale.setScalar(0.7 + Math.random() * 0.6);
+    scene.add(tree);
+    placed++;
+  }
+}
+
+// ================== MODELOS ==================
+const loader = new GLTFLoader();
+const modelCache = new Map();
+function loadModel(name) {
+  if (!modelCache.has(name)) {
+    modelCache.set(name, loader.loadAsync(MODELS + name + '.glb').then(g => {
+      g.scene.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+      return g.scene;
+    }));
+  }
+  return modelCache.get(name);
+}
+// Precarga
+GIFTS.forEach(g => loadModel(g.vehicle));
+loadModel('cone');
+
+function makeLabel(text) {
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  ctx.font = 'bold 40px system-ui, sans-serif';
+  const w = Math.min(512, ctx.measureText(text).width + 40);
+  c.width = w; c.height = 64;
+  ctx.font = 'bold 40px system-ui, sans-serif';
+  ctx.fillStyle = 'rgba(0,0,0,.6)';
+  ctx.beginPath(); ctx.roundRect(0, 0, w, 64, 20); ctx.fill();
+  ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(text, w / 2, 34, w - 20);
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), depthTest: false }));
+  s.scale.set(w / 64 * 0.9, 0.9, 1);
+  s.renderOrder = 10;
+  return s;
+}
+
+// ================== VEHÍCULOS ==================
+const cars = [];
+let laneToggle = 0;
+
+async function spawnCar(vehicle, user, laps) {
+  if (cars.length >= MAX_CARS) return;
+  const proto = await loadModel(vehicle);
+  const root = new THREE.Group();
+  const model = proto.clone(true);
+  root.add(model);
+  const wheels = [];
+  model.traverse(o => { if (o.name.startsWith('wheel')) wheels.push(o); });
+  const label = makeLabel(user);
+  label.position.y = 2.2;
+  root.add(label);
+  root.scale.setScalar(0.001);
+  scene.add(root);
+  const lane = (laneToggle++ % 2) ? LANE : -LANE;
+  cars.push({
+    root, wheels, label, lane, laps,
+    dist: -2, // arranca justo antes de la línea de salida
+    travelled: 0,
+    speed: speedFor(vehicle) * (0.9 + Math.random() * 0.2),
+    cur: 0, age: 0, leaving: 0,
+  });
+}
+
+// ================== CONOS (TAPS) ==================
+const cones = [];
+async function spawnCone() {
+  if (cones.length >= MAX_CONES) { const old = cones.shift(); scene.remove(old.mesh); }
+  const proto = await loadModel('cone');
+  const mesh = proto.clone(true);
+  mesh.scale.setScalar(2.4);
+  const d = Math.random() * TRACK_LEN;
+  const off = (Math.random() - 0.5) * (ROAD_W - 1.5);
+  trackAt(d, off, mesh.position);
+  mesh.position.y = 8; // cae desde arriba
+  scene.add(mesh);
+  cones.push({ mesh, vel: new THREE.Vector3(), spin: new THREE.Vector3(), hit: false, landed: false, age: 0 });
+}
+
+// ================== EVENTOS (API) ==================
+const giftByName = new Map(GIFTS.map(g => [g.gift.toLowerCase(), g]));
+const feed = document.getElementById('feed');
+
+function pushFeed(html) {
+  const el = document.createElement('div');
+  el.className = 'ev'; el.innerHTML = html;
+  feed.prepend(el);
+  while (feed.children.length > 7) feed.lastChild.remove();
+  setTimeout(() => { el.style.opacity = 0; setTimeout(() => el.remove(), 600); }, 5000);
+}
+const esc = s => String(s).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+
+// Llamar desde la integración real de TikTok: onGift('Rose', 'usuario', 1)
+function onGift(giftName, user = 'Anónimo', count = 1) {
+  const g = giftByName.get(String(giftName).toLowerCase());
+  if (!g) return;
+  pushFeed(`<img src="${PREVIEWS}${g.vehicle}.png"> <b>${esc(user)}</b> envió <span class="gicon">${giftIcon(g)}</span> ${esc(g.gift)}${count > 1 ? ' x' + count : ''}`);
+  for (let i = 0; i < Math.min(count, 10); i++) setTimeout(() => spawnCar(g.vehicle, user, lapsFor(g.coins)), i * 450);
+}
+// Llamar desde la integración real de TikTok: onLike('usuario', likeCount)
+function onLike(user = 'Anónimo', count = 1) {
+  const n = Math.min(count, 5);
+  for (let i = 0; i < n; i++) setTimeout(spawnCone, i * 120);
+}
+window.onGift = onGift;
+window.onLike = onLike;
+
+// ================== TECLADO (pruebas locales) ==================
+const giftByKey = new Map(GIFTS.map(g => [g.key, g]));
+const testUsers = ['Ana', 'Carlos', 'Luisa', 'Pedro', 'Sofía', 'Mateo', 'Valen', 'Diego'];
+const randUser = () => testUsers[Math.floor(Math.random() * testUsers.length)];
+addEventListener('keydown', e => {
+  if (e.repeat && e.code !== 'Space') return;
+  if (e.code === 'Space' || e.key.toUpperCase() === 'Z') { e.preventDefault(); onLike(randUser(), 1); return; }
+  const g = giftByKey.get(e.key.toUpperCase());
+  if (g) onGift(g.gift, randUser(), e.shiftKey ? 5 : 1);
+});
+// Tab oculta/muestra el panel (las letras ya están asignadas a regalos)
+addEventListener('keydown', e => { if (e.code === 'Tab') { e.preventDefault(); document.getElementById('help').classList.toggle('hidden'); } });
+// Imagen del regalo con el emoji como respaldo si falta el archivo
+const giftSlug = g => g.gift.toLowerCase().replace(/\s+/g, '-');
+function giftIcon(g) {
+  return `<img src="gifts/${giftSlug(g)}.png" alt="${g.emoji}" onerror="this.replaceWith(this.alt)">`;
+}
+// Botones clicables (por si el teclado no llega a la página)
+const giftList = document.getElementById('giftList');
+giftList.innerHTML = GIFTS.map(g =>
+  `<button data-key="${g.key}" title="${g.gift} (${g.coins} monedas) → ${g.vehicle}, ${lapsFor(g.coins)} vueltas (tecla ${g.key})"><span class="gift">${giftIcon(g)}</span><img src="${PREVIEWS}${g.vehicle}.png"></button>`
+).join('') + `<button data-cone title="Tap → cono (Espacio o Z)"><span class="gift">👆</span><img src="${PREVIEWS}cone.png"></button>`;
+giftList.addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.cone !== undefined) onLike(randUser(), 1);
+  else { const g = giftByKey.get(b.dataset.key); onGift(g.gift, randUser(), e.shiftKey ? 5 : 1); }
+  b.blur();
+});
+
+// ================== BUCLE ==================
+const clock = new THREE.Clock();
+const ahead = new THREE.Vector3();
+const stats = document.getElementById('stats');
+
+function update(dt) {
+  // Vehículos
+  for (let i = cars.length - 1; i >= 0; i--) {
+    const c = cars[i];
+    c.age += dt;
+
+    // Frenar si hay otro coche delante en el mismo carril
+    let target = c.speed;
+    for (const o of cars) {
+      if (o === c || o.lane !== c.lane || o.leaving) continue;
+      const gap = ((o.dist - c.dist) % TRACK_LEN + TRACK_LEN) % TRACK_LEN;
+      if (gap > 0 && gap < 4.5) target = Math.min(target, o.cur * (gap / 4.5) * 0.9);
+    }
+    c.cur += (target - c.cur) * Math.min(1, dt * 3);
+    const step = c.cur * dt;
+    c.dist += step;
+    c.travelled += step;
+
+    trackAt(c.dist, c.lane, c.root.position);
+    trackAt(c.dist + 1, c.lane, ahead);
+    c.root.lookAt(ahead);
+    for (const w of c.wheels) w.rotation.x += step / 0.3;
+
+    // Aparecer / desaparecer
+    if (!c.leaving && c.travelled >= c.laps * TRACK_LEN) c.leaving = 0.001;
+    if (c.leaving) {
+      c.leaving += dt;
+      const s = Math.max(0, 1 - c.leaving / 0.6);
+      c.root.scale.setScalar(s * CAR_SCALE);
+      c.root.position.y = c.leaving * 4;
+      if (s === 0) {
+        scene.remove(c.root);
+        c.label.material.map.dispose(); c.label.material.dispose();
+        cars.splice(i, 1);
+        continue;
+      }
+    } else {
+      const s = Math.min(1, c.age / 0.35);
+      c.root.scale.setScalar((s < 1 ? s * (1.3 - 0.3 * s) : 1) * CAR_SCALE);
+    }
+
+    // Golpear conos
+    for (const k of cones) {
+      if (k.hit || !k.landed) continue;
+      const dx = k.mesh.position.x - c.root.position.x, dz = k.mesh.position.z - c.root.position.z;
+      if (dx * dx + dz * dz < 1.6 * 1.6) {
+        k.hit = true;
+        k.age = 0;
+        const dir = new THREE.Vector3().subVectors(ahead, c.root.position).normalize();
+        k.vel.set(dir.x * c.cur * 0.8 + dx * 2, 6 + Math.random() * 3, dir.z * c.cur * 0.8 + dz * 2);
+        k.spin.set(Math.random() * 10 - 5, Math.random() * 10 - 5, Math.random() * 10 - 5);
+      }
+    }
+  }
+
+  // Conos
+  for (let i = cones.length - 1; i >= 0; i--) {
+    const k = cones[i];
+    k.age += dt;
+    const m = k.mesh;
+    if (!k.landed) {
+      k.vel.y -= 30 * dt;
+      m.position.y += k.vel.y * dt;
+      if (m.position.y <= 0) { m.position.y = 0; k.vel.set(0, 0, 0); k.landed = true; }
+    } else if (k.hit) {
+      k.vel.y -= 25 * dt;
+      m.position.addScaledVector(k.vel, dt);
+      m.rotation.x += k.spin.x * dt; m.rotation.y += k.spin.y * dt; m.rotation.z += k.spin.z * dt;
+      if (m.position.y < -3) { scene.remove(m); cones.splice(i, 1); continue; }
+      if (m.position.y <= 0 && k.vel.y < 0) { m.position.y = 0; k.vel.y *= -0.35; k.vel.x *= 0.6; k.vel.z *= 0.6; }
+    }
+    // Golpeados: se van a los 2 s. Sin golpear: a los 45 s
+    if (k.age > (k.hit ? 2 : 45)) {
+      m.scale.multiplyScalar(0.9);
+      if (m.scale.x < 0.05) { scene.remove(m); cones.splice(i, 1); }
+    }
+  }
+
+  stats.textContent = `Vehículos: ${cars.length}  ·  Conos: ${cones.length}`;
+}
+
+renderer.setAnimationLoop(() => {
+  const dt = Math.min(clock.getDelta(), 0.05);
+  update(dt);
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>
